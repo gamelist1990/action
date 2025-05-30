@@ -1,4 +1,3 @@
-
 name: Resource Convert
 
 on:
@@ -106,19 +105,6 @@ jobs:
               body: `📦 ZIP リソースパックファイル「**${fileName}**」が検出されました。\n\n変換処理を開始します...お待ちください。`
             });
 
-      - name: Setup manifest for McEncryptor
-        if: steps.download.outputs.download_success == 'true'
-        shell: powershell
-        run: |
-          $manifestContent = @'
-          {
-            "uuid": "00000000-0000-0000-0000-000000000000"
-          }
-          '@
-          
-          New-Item -Path "MCEnc\manifest.json" -Force -ItemType File -Value $manifestContent
-          Write-Host "マニフェストファイルが作成されました"
-
       - name: Convert resource pack
         id: convert
         if: steps.download.outputs.download_success == 'true'
@@ -130,22 +116,12 @@ jobs:
             
             cd ${{ github.workspace }}
             
-            # 変換前にマニフェストファイルが存在することを確認
-            if (-not (Test-Path "MCEnc\manifest.json")) {
-              $manifestContent = @'
-              {
-                "uuid": "00000000-0000-0000-0000-000000000000"
-              }
-              '@
-              New-Item -Path "MCEnc\manifest.json" -Force -ItemType File -Value $manifestContent
-              Write-Host "マニフェストファイルが作成されました"
-            }
-            
-            # McEncryptorのパスとファイルパスを両方とも絶対パスで指定
+            # McEncryptorのパス
             $mcEncPath = Join-Path ${{ github.workspace }} "MCEnc\McEncryptor.exe"
             
-            # コマンドライン実行時にファイルパスを渡す
-            Start-Process -FilePath $mcEncPath -ArgumentList "`"$filePath`"" -NoNewWindow -Wait
+            # コンソールに入力をパイプで渡す方法でMcEncryptorを実行
+            Write-Host "入力パスを送信してMcEncryptorを実行します: $filePath"
+            echo "$filePath" | & $mcEncPath
             
             # 変換されたファイルを探索
             $fileNameWithoutExt = [System.IO.Path]::GetFileNameWithoutExtension($filePath)
@@ -159,16 +135,16 @@ jobs:
             if ($convertedFile) {
               Write-Host "変換されたファイルが見つかりました: $($convertedFile.FullName)"
               Move-Item -Path $convertedFile.FullName -Destination $outputPath -Force
-              Write-Output "converted_file_path=$outputPath" >> $env:GITHUB_OUTPUT
-              Write-Output "converted_file_name=$($convertedFile.Name)" >> $env:GITHUB_OUTPUT
-              Write-Output "conversion_success=true" >> $env:GITHUB_OUTPUT
+              "converted_file_path=$outputPath" >> $env:GITHUB_OUTPUT
+              "converted_file_name=$($convertedFile.Name)" >> $env:GITHUB_OUTPUT
+              "conversion_success=true" >> $env:GITHUB_OUTPUT
             } else {
-              Write-Output "conversion_success=false" >> $env:GITHUB_OUTPUT
+              "conversion_success=false" >> $env:GITHUB_OUTPUT
               Write-Output "::error::Converted file not found"
               exit 1
             }
           } catch {
-            Write-Output "conversion_success=false" >> $env:GITHUB_OUTPUT
+            "conversion_success=false" >> $env:GITHUB_OUTPUT
             Write-Output "::error::Conversion failed: $($_.Exception.Message)"
             exit 1
           }
