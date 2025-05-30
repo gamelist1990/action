@@ -111,6 +111,10 @@ jobs:
         shell: powershell
         run: |
           try {
+            # UTF-8エンコーディングを強制
+            [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+            $OutputEncoding = [System.Text.Encoding]::UTF8
+            
             $filePath = "${{ steps.download.outputs.file_path }}"
             $outputPath = "${{ runner.temp }}/converted_${{ steps.download.outputs.file_name }}"
             
@@ -122,18 +126,20 @@ jobs:
             Write-Host "MCEnc ディレクトリ内のファイル一覧:"
             Get-ChildItem -Path "MCEnc" -Force | ForEach-Object { Write-Host $_.FullName }
             
-            # Start-Processを使ってMcEncryptorを起動し、標準入力にファイルパスを書き込む
-            $process = Start-Process -FilePath $mcEncPath -RedirectStandardInput -NoNewWindow -PassThru
+            # コンソールアプリケーションを実行する方法を修正
+            Write-Host "McEncryptorを実行します: $mcEncPath"
             
-            # 少し待ってからパスを入力
-            Start-Sleep -Seconds 2
+            try {
+                # echoコマンドを使ってパスを渡す
+                $command = "echo `"$filePath`" | & `"$mcEncPath`""
+                Write-Host "実行コマンド: $command"
+                Invoke-Expression $command
+            }
+            catch {
+                Write-Host "コマンド実行中にエラーが発生しました: $_"
+            }
             
-            # パスを入力して処理開始
-            $process.StandardInput.WriteLine($filePath)
-            $process.StandardInput.Close()
-            
-            # プロセスが終了するのを待つ (最大60秒)
-            $process.WaitForExit(60000)
+            Write-Host "McEncryptorの実行が完了しました。出力ファイルを検索します。"
             
             # 変換完了まで少し待機
             Write-Host "変換処理の完了を待機中..."
