@@ -67,8 +67,8 @@ jobs:
             let fileName = null;
             
             for (const text of textToSearch) {
-              // 通常のURL形式を検出
-              const regex = /https:\/\/github\.com\/[^\/\s]+\/(?:files|user-attachments\/files)\/[^\/\s]+\/[^\/\s]+\.(zip|mcpack)/gi;
+              // ZIP形式のみを検出するように正規表現を修正
+              const regex = /https:\/\/github\.com\/[^\/\s]+\/(?:files|user-attachments\/files)\/[^\/\s]+\/[^\/\s]+\.zip/gi;
               const matches = text.match(regex);
               
               if (matches && matches.length > 0) {
@@ -77,8 +77,8 @@ jobs:
                 break;
               }
               
-              // Markdownリンク形式も検出
-              const mdLinkRegex = /\[.*?\]\((https:\/\/github\.com\/[^\/\s]+\/(?:files|user-attachments\/files)\/[^\/\s]+\/[^\/\s]+\.(zip|mcpack))\)/gi;
+              // Markdownリンク形式も検出（ZIP形式のみ）
+              const mdLinkRegex = /\[.*?\]\((https:\/\/github\.com\/[^\/\s]+\/(?:files|user-attachments\/files)\/[^\/\s]+\/[^\/\s]+\.zip)\)/gi;
               let mdMatch;
               
               while ((mdMatch = mdLinkRegex.exec(text)) !== null) {
@@ -91,7 +91,7 @@ jobs:
             }
             
             if (!attachmentUrl) {
-              core.setFailed('No resource pack file found in the issue or comments');
+              core.setFailed('ZIPファイル形式のリソースパックが見つかりませんでした。Issue本文またはコメントにZIPファイルのURLを記載してください。');
               return;
             }
             
@@ -119,7 +119,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: issueNumber,
-              body: `🔍 リソースパックファイル「**${fileName}**」を検出しました\n\n変換処理を開始します...お待ちください。`
+              body: `🔍 ZIPリソースパックファイル「**${fileName}**」を検出しました\n\n変換処理を開始します...お待ちください。`
             });
 
       - name: Convert resource pack
