@@ -45,51 +45,59 @@ jobs:
             const path = require('path');
             const { execSync } = require('child_process');
             
-            // Issueのコメントから添付ファイルのURLを抽出
-            const comment = context.payload.comment;
+            // Issue本文からURLを抽出
+            const issueBody = context.payload.issue.body || '';
+            // コメントも確認するため、最新のコメントを取得
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
             
-            // デバッグ用にコメント内容をログに出力
-            console.log('Comment body:', comment.body);
+            // Issue本文とすべてのコメントを検索対象にする
+            const textToSearch = [issueBody];
+            for (const comment of comments.data) {
+              textToSearch.push(comment.body);
+            }
             
-            // より柔軟な正規表現パターン - GitHubの添付ファイルURLを幅広く検出
-            const regex = /https:\/\/github\.com\/[^\/\s]+\/(?:files|user-attachments\/files)\/[^\/\s]+\/[^\/\s]+\.(zip|mcpack)/gi;
-            const matches = comment.body.match(regex);
+            console.log('Searching in:', textToSearch);
             
-            console.log('Matches found:', matches);
+            // URLを検索
+            let attachmentUrl = null;
+            let fileName = null;
             
-            if (!matches || matches.length === 0) {
-              // Markdownリンク形式も検出してみる
+            for (const text of textToSearch) {
+              // 通常のURL形式を検出
+              const regex = /https:\/\/github\.com\/[^\/\s]+\/(?:files|user-attachments\/files)\/[^\/\s]+\/[^\/\s]+\.(zip|mcpack)/gi;
+              const matches = text.match(regex);
+              
+              if (matches && matches.length > 0) {
+                attachmentUrl = matches[0];
+                fileName = path.basename(attachmentUrl);
+                break;
+              }
+              
+              // Markdownリンク形式も検出
               const mdLinkRegex = /\[.*?\]\((https:\/\/github\.com\/[^\/\s]+\/(?:files|user-attachments\/files)\/[^\/\s]+\/[^\/\s]+\.(zip|mcpack))\)/gi;
-              const mdMatches = [];
               let mdMatch;
               
-              while ((mdMatch = mdLinkRegex.exec(comment.body)) !== null) {
-                mdMatches.push(mdMatch[1]); // URLの部分だけを取得
+              while ((mdMatch = mdLinkRegex.exec(text)) !== null) {
+                attachmentUrl = mdMatch[1];
+                fileName = path.basename(attachmentUrl);
+                break;
               }
               
-              console.log('Markdown link matches found:', mdMatches);
-              
-              if (mdMatches.length > 0) {
-                // Markdownリンクからファイル名を取得
-                const attachmentUrl = mdMatches[0];
-                const fileName = path.basename(attachmentUrl);
-                const downloadPath = path.join(process.env.GITHUB_WORKSPACE, fileName);
-                
-                // ファイルをダウンロード
-                execSync(`curl -L "${attachmentUrl}" -o "${downloadPath}"`);
-                
-                console.log(`Downloaded file from markdown link to: ${downloadPath}`);
-                core.setOutput('file_path', downloadPath);
-                core.setOutput('file_name', fileName);
-                return { file_path: downloadPath, file_name: fileName };
-              }
-              
-              core.setFailed('No resource pack file found in the comment');
+              if (attachmentUrl) break;
+            }
+            
+            if (!attachmentUrl) {
+              core.setFailed('No resource pack file found in the issue or comments');
               return;
             }
             
-            const attachmentUrl = matches[0];
-            const fileName = path.basename(attachmentUrl);
+            console.log('Found attachment URL:', attachmentUrl);
+            console.log('File name:', fileName);
+            
             const downloadPath = path.join(process.env.GITHUB_WORKSPACE, fileName);
             
             // ファイルをダウンロード
