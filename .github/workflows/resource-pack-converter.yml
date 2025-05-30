@@ -1,0 +1,130 @@
+name: Resource Pack Converter
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  convert-resource-pack:
+    # Convertコマンドが入力された場合のみ実行
+    if: contains(github.event.comment.body, 'Convert')
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Get issue info
+        id: issue
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const issueNumber = context.issue.number;
+            const issue = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber
+            });
+            
+            return {
+              number: issueNumber,
+              title: issue.data.title,
+              body: issue.data.body
+            };
+
+      - name: Download attachment
+        id: download
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const { execSync } = require('child_process');
+            
+            // Issueのコメントから添付ファイルのURLを抽出
+            const comment = context.payload.comment;
+            const regex = /https:\/\/github\.com\/.*\/files\/.*\.(zip|mcpack)/g;
+            const matches = comment.body.match(regex);
+            
+            if (!matches || matches.length === 0) {
+              core.setFailed('No resource pack file found in the comment');
+              return;
+            }
+            
+            const attachmentUrl = matches[0];
+            const fileName = path.basename(attachmentUrl);
+            const downloadPath = path.join(process.env.GITHUB_WORKSPACE, fileName);
+            
+            // ファイルをダウンロード
+            execSync(`curl -L "${attachmentUrl}" -o "${downloadPath}"`);
+            
+            console.log(`Downloaded file to: ${downloadPath}`);
+            core.setOutput('file_path', downloadPath);
+            core.setOutput('file_name', fileName);
+            return { file_path: downloadPath, file_name: fileName };
+
+      - name: Convert resource pack
+        id: convert
+        shell: powershell
+        run: |
+          $filePath = "${{ steps.download.outputs.file_path }}"
+          $outputPath = "${{ runner.temp }}/converted_${{ steps.download.outputs.file_name }}"
+          
+          # McEncryptor.exeの実行
+          cd ${{ github.workspace }}
+          $process = Start-Process -FilePath "MCEnc/McEncryptor.exe" -NoNewWindow -PassThru
+          Start-Sleep -Seconds 2
+          
+          # ファイルパスの入力
+          Add-Type -AssemblyName System.Windows.Forms
+          [System.Windows.Forms.SendKeys]::SendWait("$filePath{ENTER}")
+          
+          # プロセスが終了するまで待機
+          $process.WaitForExit()
+          
+          # 変換されたファイルを探して移動
+          $convertedFile = Get-ChildItem -Path (Split-Path -Parent $filePath) -Filter "*converted*" | Select-Object -First 1
+          if ($convertedFile) {
+            Move-Item -Path $convertedFile.FullName -Destination $outputPath
+            Write-Output "::set-output name=converted_file_path::$outputPath"
+            Write-Output "::set-output name=converted_file_name::$($convertedFile.Name)"
+          } else {
+            Write-Output "::error::Converted file not found"
+            exit 1
+          }
+
+      - name: Upload converted file
+        uses: actions/upload-artifact@v3
+        with:
+          name: converted-resource-pack
+          path: ${{ steps.convert.outputs.converted_file_path }}
+          retention-days: 7
+
+      - name: Create download link
+        id: download_link
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const artifactName = 'converted-resource-pack';
+            const runId = context.runId;
+            const repoOwner = context.repo.owner;
+            const repoName = context.repo.repo;
+            
+            const downloadUrl = `https://github.com/${repoOwner}/${repoName}/actions/runs/${runId}/artifacts/${artifactName}`;
+            core.setOutput('url', downloadUrl);
+            return { url: downloadUrl };
+
+      - name: Notify on issue
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const issueNumber = context.issue.number;
+            const downloadUrl = '${{ steps.download_link.outputs.url }}';
+            const fileName = '${{ steps.convert.outputs.converted_file_name }}';
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: `✅ リソースパックの変換が完了しました！\n\n変換されたファイル: ${fileName}\n\n[ダウンロードリンク](${downloadUrl})\n\nこのファイルは7日間保存されます。`
+            });
