@@ -65,6 +65,20 @@ jobs:
             core.setOutput('file_name', fileName);
             return { file_path: downloadPath, file_name: fileName };
 
+      - name: Notify file detection
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const issueNumber = context.issue.number;
+            const fileName = '${{ steps.download.outputs.file_name }}';
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: `🔍 リソースパックファイルを検出しました: **${fileName}**\n\n変換処理を開始します...お待ちください。`
+            });
+
       - name: Convert resource pack
         id: convert
         shell: powershell
