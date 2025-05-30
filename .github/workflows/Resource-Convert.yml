@@ -126,13 +126,33 @@ jobs:
             Write-Host "MCEnc ディレクトリ内のファイル一覧:"
             Get-ChildItem -Path "MCEnc" -Force | ForEach-Object { Write-Host $_.FullName }
             
-            # コンソールアプリケーションを実行する方法を修正
+            # コンソールアプリケーションを実行方法を修正
             Write-Host "McEncryptorを実行します: $mcEncPath"
             
-            # echoコマンドを使ってパスを渡す
-            $command = "echo `"$filePath`" | & `"$mcEncPath`""
-            Write-Host "実行コマンド: $command"
-            Invoke-Expression $command
+            # 一時ファイルにパスを書き込む
+            $inputFile = Join-Path $env:TEMP "mcencryptor_input.txt"
+            # 正規化されたパスを使用
+            $normalizedPath = [System.IO.Path]::GetFullPath($filePath)
+            Set-Content -Path $inputFile -Value $normalizedPath -Encoding UTF8
+            
+            Write-Host "入力ファイルに書き込んだパス: $normalizedPath"
+            
+            # Start-Processを使ってリダイレクトと入力ファイルを指定
+            $processInfo = New-Object System.Diagnostics.ProcessStartInfo
+            $processInfo.FileName = $mcEncPath
+            $processInfo.UseShellExecute = $false
+            $processInfo.RedirectStandardInput = $true
+            
+            $process = [System.Diagnostics.Process]::Start($processInfo)
+            
+            # ファイルから読み取って入力
+            Get-Content -Path $inputFile -Encoding UTF8 | ForEach-Object {
+                $process.StandardInput.WriteLine($_)
+            }
+            $process.StandardInput.Close()
+            
+            # 処理の終了を待つ
+            $process.WaitForExit(60000)
             
             Write-Host "McEncryptorの実行が完了しました。出力ファイルを検索します。"
             
