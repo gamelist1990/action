@@ -166,21 +166,45 @@ jobs:
           echo Waiting for conversion process to complete...
           timeout /t 15
           
-          :: ワークスペースでZIPファイルを検索（変換後に生成されたもの）
-          echo Searching for converted ZIP files in the workspace:
+          :: 生成されたファイルを探すために広範囲を検索
+          echo Searching for converted files in multiple locations...
+          
+          :: 検索候補のディレクトリを列挙
+          set "searchDirs=%extractDir% %extractDir%\.. %TEMP% ${{ github.workspace }}"
+          
+          :: 最近更新されたZIPファイル（元のファイル以外）を時間順に表示
+          echo Listing all recent ZIP files (sorted by time):
+          for %%d in (%searchDirs%) do (
+            echo Searching in: %%d
+            dir /b /s /a-d /o-d "%%d\*.zip" 2>nul
+          )
+          
+          :: 最初に一致するZIPファイルを処理（元のファイル以外）
           set "found=false"
+          for %%d in (%searchDirs%) do (
+            if "%found%"=="false" (
+              for /f "delims=" %%i in ('dir /b /s /a-d /o-d "%%d\*.zip" 2^>nul') do (
+                if not "%%i"=="%filePath%" (
+                  echo ZIP file found: %%i
+                  set "convertedFile=%%i"
+                  set "found=true"
+                  goto :found_file
+                )
+              )
+            )
+          )
           
-          :: 元のzipファイル名を取得（拡張子なし）
-          for %%F in ("%filePath%") do set "fileNameBase=%%~nF"
-          echo Original filename without extension: %fileNameBase%
-          
-          :: 作業ディレクトリ内で最新のZIPファイルを検索
-          for /f "delims=" %%i in ('dir /b /s /a-d /o-d "${{ github.workspace }}\*.zip" "%extractDir%\*.zip"') do (
-            if not "%%i"=="%filePath%" (
-              echo ZIP file found: %%i
-              set "convertedFile=%%i"
-              set "found=true"
-              goto :found_file
+          :: もし何も見つからなければ、特別な検索を行う
+          if "%found%"=="false" (
+            echo No ZIP files found in primary search. Searching for any recent files...
+            for /f "delims=" %%f in ('dir /b /s /a-d /o-d "%TEMP%\*.zip" "${{ github.workspace }}\*.zip" 2^>nul') do (
+              if not "%%f"=="%filePath%" (
+                if "!found!"=="false" (
+                  echo Recent file found: %%f
+                  set "convertedFile=%%f"
+                  set "found=true"
+                )
+              )
             )
           )
           
