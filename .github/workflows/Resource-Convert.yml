@@ -139,9 +139,25 @@ jobs:
             exit /b 1
           )
           
-          :: McEncryptorの実行 - パスをファイルに書き込んでからリダイレクト
+          :: ZIPファイルを一時ディレクトリに解凍
+          set "extractDir=%TEMP%\mcencryptor_extract_%RANDOM%"
+          echo Extracting ZIP file to: %extractDir%
+          mkdir "%extractDir%" 2>nul
+          
+          :: 解凍処理を実行
+          powershell -command "Expand-Archive -Path '%filePath%' -DestinationPath '%extractDir%' -Force"
+          if %ERRORLEVEL% neq 0 (
+            echo Error extracting ZIP file
+            exit /b 1
+          )
+          
+          echo ZIP file extracted successfully
+          dir /s /b "%extractDir%"
+          
+          :: McEncryptorに解凍されたディレクトリのパスを渡す
           set "tempInputFile=%TEMP%\mcencryptor_input.txt"
-          echo %filePath%> "%tempInputFile%"
+          echo %extractDir%> "%tempInputFile%"
+          echo Sending path to McEncryptor: %extractDir%
           type "%tempInputFile%" | "%mcEncPath%"
           
           echo McEncryptor execution completed. Searching for output files.
@@ -150,16 +166,16 @@ jobs:
           echo Waiting for conversion process to complete...
           timeout /t 15
           
-          :: 変換されたファイル名のベース部分
-          for %%F in ("%filePath%") do set "fileNameBase=%%~nF"
-          echo Filename without extension: %fileNameBase%
-          
-          :: ワークスペースでZIPファイルを検索
-          echo Searching for ZIP files in the workspace:
+          :: ワークスペースでZIPファイルを検索（変換後に生成されたもの）
+          echo Searching for converted ZIP files in the workspace:
           set "found=false"
           
-          :: すべてのZIPファイルを検索（最新の修正日付でソート）
-          for /f "delims=" %%i in ('dir /b /s /a-d /o-d "${{ github.workspace }}\*.zip"') do (
+          :: 元のzipファイル名を取得（拡張子なし）
+          for %%F in ("%filePath%") do set "fileNameBase=%%~nF"
+          echo Original filename without extension: %fileNameBase%
+          
+          :: 作業ディレクトリ内で最新のZIPファイルを検索
+          for /f "delims=" %%i in ('dir /b /s /a-d /o-d "${{ github.workspace }}\*.zip" "%extractDir%\*.zip"') do (
             if not "%%i"=="%filePath%" (
               echo ZIP file found: %%i
               set "convertedFile=%%i"
