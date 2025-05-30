@@ -108,88 +108,78 @@ jobs:
       - name: Convert resource pack
         id: convert
         if: steps.download.outputs.download_success == 'true'
-        shell: powershell
+        shell: cmd
         run: |
-          # UTF-8エンコーディングを強制
-          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-          $OutputEncoding = [System.Text.Encoding]::UTF8
+          @echo off
           
-          try {
-            $filePath = "${{ steps.download.outputs.file_path }}"
-            $outputPath = "${{ runner.temp }}/converted_${{ steps.download.outputs.file_name }}"
-            
-            cd ${{ github.workspace }}
-            
-            # McEncryptorのパス
-            $mcEncPath = Join-Path ${{ github.workspace }} "MCEnc\McEncryptor.exe"
-            
-            Write-Host "Files in MCEnc directory:"
-            Get-ChildItem -Path "MCEnc" -Force | ForEach-Object { Write-Host $_.FullName }
-            
-            # 単純な方法でMcEncryptorを実行する
-            Write-Host "Executing McEncryptor: $mcEncPath"
-            
-            # 現在のディレクトリを確認
-            $currentDir = Get-Location
-            Write-Host "Current working directory: $currentDir"
-            
-            # 単純なコマンドライン実行
-            Write-Host "Attempting simple command execution"
-            
-            # 入力ファイルの存在を確認
-            if (Test-Path $filePath) {
-                Write-Host "Input file exists: $filePath"
-            } else {
-                Write-Host "Error: Input file $filePath not found"
-            }
-            
-            # 直接エコーコマンドでパイプ
-            cmd /c "echo $filePath | $mcEncPath"
-            
-            Write-Host "McEncryptor execution completed. Searching for output files."
-            
-            # 変換完了まで少し長めに待機
-            Write-Host "Waiting for conversion process to complete..."
-            Start-Sleep -Seconds 15
-            
-            # 変換されたファイルを複数の方法で探索
-            Write-Host "Searching for converted files..."
-            
-            # 方法1: 元ファイル名に基づく検索
-            $fileNameWithoutExt = [System.IO.Path]::GetFileNameWithoutExtension($filePath)
-            Write-Host "Filename without extension: $fileNameWithoutExt"
-            
-            # 方法2: ワークスペース全体を検索
-            Write-Host "Searching for ZIP files in the workspace:"
-            $allZips = Get-ChildItem -Path ${{ github.workspace }} -Recurse -Filter "*.zip" | Where-Object { $_.FullName -ne $filePath }
-            
-            foreach ($zip in $allZips) {
-                Write-Host "ZIP file found: $($zip.FullName) (Last modified: $($zip.LastWriteTime))"
-            }
-            
-            # 最も新しいZIPファイルを選択
-            $convertedFile = $allZips | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-            
-            if ($convertedFile) {
-              Write-Host "Converted file found: $($convertedFile.FullName)"
-              Move-Item -Path $convertedFile.FullName -Destination $outputPath -Force
-              "converted_file_path=$outputPath" >> $env:GITHUB_OUTPUT
-              "converted_file_name=$($convertedFile.Name)" >> $env:GITHUB_OUTPUT
-              "conversion_success=true" >> $env:GITHUB_OUTPUT
-            } else {
-              Write-Host "Converted file search results:"
-              Get-ChildItem -Path ${{ github.workspace }} -Recurse -Filter "*.zip" | ForEach-Object { Write-Host $_.FullName }
-              "conversion_success=false" >> $env:GITHUB_OUTPUT
-              Write-Output "::error::Converted file not found"
-              exit 1
-            }
-          } 
-          catch {
-            Write-Host "Error details: $_"
-            "conversion_success=false" >> $env:GITHUB_OUTPUT
-            Write-Output "::error::Conversion failed: $($_.Exception.Message)"
-            exit 1
-          }
+          :: 入力ファイルのパスと出力パスを設定
+          set "filePath=${{ steps.download.outputs.file_path }}"
+          set "outputPath=${{ runner.temp }}/converted_${{ steps.download.outputs.file_name }}"
+          
+          cd ${{ github.workspace }}
+          
+          :: McEncryptorのパスを設定
+          set "mcEncPath=${{ github.workspace }}\MCEnc\McEncryptor.exe"
+          
+          echo Files in MCEnc directory:
+          dir /b "MCEnc"
+          
+          echo Executing McEncryptor: %mcEncPath%
+          
+          echo Current working directory:
+          cd
+          
+          echo Attempting command execution...
+          
+          :: 入力ファイルの存在確認
+          if exist "%filePath%" (
+            echo Input file exists: %filePath%
+          ) else (
+            echo Error: Input file %filePath% not found
+            exit /b 1
+          )
+          
+          :: McEncryptorの実行
+          echo %filePath% | "%mcEncPath%"
+          
+          echo McEncryptor execution completed. Searching for output files.
+          
+          :: 変換処理の完了を待機
+          echo Waiting for conversion process to complete...
+          timeout /t 15
+          
+          :: 変換されたファイル名のベース部分
+          for %%F in ("%filePath%") do set "fileNameBase=%%~nF"
+          echo Filename without extension: %fileNameBase%
+          
+          :: ワークスペースでZIPファイルを検索
+          echo Searching for ZIP files in the workspace:
+          set "found=false"
+          
+          :: すべてのZIPファイルを検索（最新の修正日付でソート）
+          for /f "delims=" %%i in ('dir /b /s /a-d /o-d "${{ github.workspace }}\*.zip"') do (
+            if not "%%i"=="%filePath%" (
+              echo ZIP file found: %%i
+              set "convertedFile=%%i"
+              set "found=true"
+              goto :found_file
+            )
+          )
+          
+          :found_file
+          if "%found%"=="true" (
+            echo Converted file found: %convertedFile%
+            move "%convertedFile%" "%outputPath%"
+            echo converted_file_path=%outputPath%>> %GITHUB_OUTPUT%
+            for %%F in ("%convertedFile%") do echo converted_file_name=%%~nxF>> %GITHUB_OUTPUT%
+            echo conversion_success=true>> %GITHUB_OUTPUT%
+          ) else (
+            echo Converted file search results:
+            dir /b /s "${{ github.workspace }}\*.zip"
+            echo conversion_success=false>> %GITHUB_OUTPUT%
+            echo ::error::Converted file not found
+            exit /b 1
+          )
 
       - name: Notify conversion error
         if: failure() && steps.convert.conclusion == 'failure'
