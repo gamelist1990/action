@@ -9,15 +9,14 @@ jobs:
     # buildラベルが追加された場合のみ実行
     if: github.event.label.name == 'build'
     runs-on: windows-latest
-    name: Minecraft Resource Pack Converter
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Get issue info
         id: issue
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         with:
           script: |
             const issueNumber = context.issue.number;
@@ -38,7 +37,7 @@ jobs:
 
       - name: Download attachment
         id: download
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
@@ -109,7 +108,7 @@ jobs:
             return { file_path: downloadPath, file_name: fileName };
 
       - name: Notify file detection
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         with:
           script: |
             const issueNumber = context.issue.number;
@@ -145,15 +144,15 @@ jobs:
           $convertedFile = Get-ChildItem -Path (Split-Path -Parent $filePath) -Filter "*converted*" | Select-Object -First 1
           if ($convertedFile) {
             Move-Item -Path $convertedFile.FullName -Destination $outputPath
-            Write-Output "::set-output name=converted_file_path::$outputPath"
-            Write-Output "::set-output name=converted_file_name::$($convertedFile.Name)"
+            Write-Output "converted_file_path=$outputPath" >> $env:GITHUB_OUTPUT
+            Write-Output "converted_file_name=$($convertedFile.Name)" >> $env:GITHUB_OUTPUT
           } else {
             Write-Output "::error::Converted file not found"
             exit 1
           }
 
       - name: Upload converted file
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: converted-resource-pack
           path: ${{ steps.convert.outputs.converted_file_path }}
@@ -161,20 +160,23 @@ jobs:
 
       - name: Create download link
         id: download_link
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         with:
           script: |
-            const artifactName = 'converted-resource-pack';
-            const runId = context.runId;
-            const repoOwner = context.repo.owner;
-            const repoName = context.repo.repo;
+            const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.runId
+            });
             
-            const downloadUrl = `https://github.com/${repoOwner}/${repoName}/actions/runs/${runId}/artifacts/${artifactName}`;
+            const artifact = artifacts.data.artifacts.find(a => a.name === 'converted-resource-pack');
+            const downloadUrl = artifact ? artifact.archive_download_url : `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            
             core.setOutput('url', downloadUrl);
             return { url: downloadUrl };
 
       - name: Add label to issue
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         with:
           script: |
             const issueNumber = context.issue.number;
@@ -187,7 +189,7 @@ jobs:
             });
 
       - name: Notify on issue
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         with:
           script: |
             const issueNumber = context.issue.number;
