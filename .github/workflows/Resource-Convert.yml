@@ -119,9 +119,25 @@ jobs:
             # McEncryptorのパス
             $mcEncPath = Join-Path ${{ github.workspace }} "MCEnc\McEncryptor.exe"
             
-            # コンソールに入力をパイプで渡す方法でMcEncryptorを実行
-            Write-Host "入力パスを送信してMcEncryptorを実行します: $filePath"
-            echo "$filePath" | & $mcEncPath
+            Write-Host "MCEnc ディレクトリ内のファイル一覧:"
+            Get-ChildItem -Path "MCEnc" -Force | ForEach-Object { Write-Host $_.FullName }
+            
+            # Start-Processを使ってMcEncryptorを起動し、標準入力にファイルパスを書き込む
+            $process = Start-Process -FilePath $mcEncPath -RedirectStandardInput -NoNewWindow -PassThru
+            
+            # 少し待ってからパスを入力
+            Start-Sleep -Seconds 2
+            
+            # パスを入力して処理開始
+            $process.StandardInput.WriteLine($filePath)
+            $process.StandardInput.Close()
+            
+            # プロセスが終了するのを待つ (最大60秒)
+            $process.WaitForExit(60000)
+            
+            # 変換完了まで少し待機
+            Write-Host "変換処理の完了を待機中..."
+            Start-Sleep -Seconds 10
             
             # 変換されたファイルを探索
             $fileNameWithoutExt = [System.IO.Path]::GetFileNameWithoutExtension($filePath)
@@ -129,6 +145,7 @@ jobs:
             
             # ファイルが見つからない場合は、より広い範囲で検索
             if (-not $convertedFile) {
+                Write-Host "指定パスで変換ファイルが見つかりませんでした。ワークスペース全体を検索します..."
                 $convertedFile = Get-ChildItem -Path ${{ github.workspace }} -Recurse -Filter "*converted*.zip" | Select-Object -First 1
             }
             
@@ -139,11 +156,14 @@ jobs:
               "converted_file_name=$($convertedFile.Name)" >> $env:GITHUB_OUTPUT
               "conversion_success=true" >> $env:GITHUB_OUTPUT
             } else {
+              Write-Host "変換ファイル検索結果:"
+              Get-ChildItem -Path ${{ github.workspace }} -Recurse -Filter "*.zip" | ForEach-Object { Write-Host $_.FullName }
               "conversion_success=false" >> $env:GITHUB_OUTPUT
               Write-Output "::error::Converted file not found"
               exit 1
             }
           } catch {
+            Write-Host "エラー詳細: $_"
             "conversion_success=false" >> $env:GITHUB_OUTPUT
             Write-Output "::error::Conversion failed: $($_.Exception.Message)"
             exit 1
