@@ -1,13 +1,13 @@
 name: Resource Pack Converter
 
 on:
-  issue_comment:
-    types: [created]
+  issues:
+    types: [labeled]
 
 jobs:
   convert-resource-pack:
-    # Issueのタイトルにbuildが含まれている場合のみ実行
-    if: contains(github.event.issue.title, 'build') || contains(github.event.issue.title, 'Build')
+    # buildラベルが追加された場合のみ実行
+    if: github.event.label.name == 'build'
     runs-on: windows-latest
     name: Minecraft Resource Pack Converter
 
@@ -28,6 +28,7 @@ jobs:
             });
             
             console.log('Issue title:', issue.data.title);
+            console.log('Issue body:', issue.data.body);
             
             return {
               number: issueNumber,
