@@ -139,8 +139,10 @@ jobs:
             exit /b 1
           )
           
-          :: McEncryptorの実行
-          echo %filePath% | "%mcEncPath%"
+          :: McEncryptorの実行 - パスをファイルに書き込んでからリダイレクト
+          set "tempInputFile=%TEMP%\mcencryptor_input.txt"
+          echo %filePath%> "%tempInputFile%"
+          type "%tempInputFile%" | "%mcEncPath%"
           
           echo McEncryptor execution completed. Searching for output files.
           
