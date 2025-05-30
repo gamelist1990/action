@@ -160,66 +160,37 @@ jobs:
           echo Sending path to McEncryptor: %extractDir%
           type "%tempInputFile%" | "%mcEncPath%"
           
-          echo McEncryptor execution completed. Searching for output files.
+          echo McEncryptor execution completed. Files should be encrypted now.
           
-          :: 変換処理の完了を待機
-          echo Waiting for conversion process to complete...
-          timeout /t 15
+          :: ディレクトリの内容を確認（暗号化後）
+          echo Checking directory contents after encryption:
+          dir /s /b "%extractDir%"
+
+          :: 元のファイル名に基づいて出力ファイル名を生成
+          for %%F in ("%filePath%") do set "fileNameBase=%%~nF"
+          set "outputZip=%TEMP%\%fileNameBase%_converted.zip"
+          echo Creating ZIP from encrypted directory: %outputZip%
           
-          :: 生成されたファイルを探すために広範囲を検索
-          echo Searching for converted files in multiple locations...
-          
-          :: 検索候補のディレクトリを列挙
-          set "searchDirs=%extractDir% %extractDir%\.. %TEMP% ${{ github.workspace }}"
-          
-          :: 最近更新されたZIPファイル（元のファイル以外）を時間順に表示
-          echo Listing all recent ZIP files (sorted by time):
-          for %%d in (%searchDirs%) do (
-            echo Searching in: %%d
-            dir /b /s /a-d /o-d "%%d\*.zip" 2>nul
+          :: 暗号化されたディレクトリを手動でZIP化
+          powershell -command "Compress-Archive -Path '%extractDir%\*' -DestinationPath '%outputZip%' -Force"
+          if %ERRORLEVEL% neq 0 (
+            echo Error creating ZIP from encrypted files
+            exit /b 1
           )
           
-          :: 最初に一致するZIPファイルを処理（元のファイル以外）
-          set "found=false"
-          for %%d in (%searchDirs%) do (
-            if "%found%"=="false" (
-              for /f "delims=" %%i in ('dir /b /s /a-d /o-d "%%d\*.zip" 2^>nul') do (
-                if not "%%i"=="%filePath%" (
-                  echo ZIP file found: %%i
-                  set "convertedFile=%%i"
-                  set "found=true"
-                  goto :found_file
-                )
-              )
-            )
-          )
+          echo Successfully created ZIP file from encrypted directory: %outputZip%
           
-          :: もし何も見つからなければ、特別な検索を行う
-          if "%found%"=="false" (
-            echo No ZIP files found in primary search. Searching for any recent files...
-            for /f "delims=" %%f in ('dir /b /s /a-d /o-d "%TEMP%\*.zip" "${{ github.workspace }}\*.zip" 2^>nul') do (
-              if not "%%f"=="%filePath%" (
-                if "!found!"=="false" (
-                  echo Recent file found: %%f
-                  set "convertedFile=%%f"
-                  set "found=true"
-                )
-              )
-            )
-          )
-          
-          :found_file
-          if "%found%"=="true" (
-            echo Converted file found: %convertedFile%
-            move "%convertedFile%" "%outputPath%"
+          :: 出力ファイルの存在を確認
+          if exist "%outputZip%" (
+            echo Moving ZIP file to output path
+            move "%outputZip%" "%outputPath%"
             echo converted_file_path=%outputPath%>> %GITHUB_OUTPUT%
-            for %%F in ("%convertedFile%") do echo converted_file_name=%%~nxF>> %GITHUB_OUTPUT%
+            echo converted_file_name=%fileNameBase%_converted.zip>> %GITHUB_OUTPUT%
             echo conversion_success=true>> %GITHUB_OUTPUT%
           ) else (
-            echo Converted file search results:
-            dir /b /s "${{ github.workspace }}\*.zip"
+            echo Failed to create output ZIP file
             echo conversion_success=false>> %GITHUB_OUTPUT%
-            echo ::error::Converted file not found
+            echo ::error::Failed to create output ZIP file
             exit /b 1
           )
 
