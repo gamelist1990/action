@@ -126,49 +126,49 @@ jobs:
             Write-Host "MCEnc ディレクトリ内のファイル一覧:"
             Get-ChildItem -Path "MCEnc" -Force | ForEach-Object { Write-Host $_.FullName }
             
-            # コンソールアプリケーションを実行方法を修正
+            # 単純な方法でMcEncryptorを実行する
             Write-Host "McEncryptorを実行します: $mcEncPath"
             
-            # 一時ファイルにパスを書き込む
-            $inputFile = Join-Path $env:TEMP "mcencryptor_input.txt"
-            # 正規化されたパスを使用
-            $normalizedPath = [System.IO.Path]::GetFullPath($filePath)
-            Set-Content -Path $inputFile -Value $normalizedPath -Encoding UTF8
+            # 現在のディレクトリを確認
+            $currentDir = Get-Location
+            Write-Host "現在の作業ディレクトリ: $currentDir"
             
-            Write-Host "入力ファイルに書き込んだパス: $normalizedPath"
+            # 単純なコマンドライン実行
+            Write-Host "シンプルなコマンド実行を試みます"
             
-            # Start-Processを使ってリダイレクトと入力ファイルを指定
-            $processInfo = New-Object System.Diagnostics.ProcessStartInfo
-            $processInfo.FileName = $mcEncPath
-            $processInfo.UseShellExecute = $false
-            $processInfo.RedirectStandardInput = $true
-            
-            $process = [System.Diagnostics.Process]::Start($processInfo)
-            
-            # ファイルから読み取って入力
-            Get-Content -Path $inputFile -Encoding UTF8 | ForEach-Object {
-                $process.StandardInput.WriteLine($_)
+            # 入力ファイルの存在を確認
+            if (Test-Path $filePath) {
+                Write-Host "変換元ファイルが存在します: $filePath"
+            } else {
+                Write-Host "エラー: 変換元ファイル $filePath が見つかりません"
             }
-            $process.StandardInput.Close()
             
-            # 処理の終了を待つ
-            $process.WaitForExit(60000)
+            # 直接エコーコマンドでパイプ
+            cmd /c "echo $filePath | $mcEncPath"
             
             Write-Host "McEncryptorの実行が完了しました。出力ファイルを検索します。"
             
-            # 変換完了まで少し待機
+            # 変換完了まで少し長めに待機
             Write-Host "変換処理の完了を待機中..."
-            Start-Sleep -Seconds 10
+            Start-Sleep -Seconds 15
             
-            # 変換されたファイルを探索
+            # 変換されたファイルを複数の方法で探索
+            Write-Host "変換されたファイルを探索中..."
+            
+            # 方法1: 元ファイル名に基づく検索
             $fileNameWithoutExt = [System.IO.Path]::GetFileNameWithoutExtension($filePath)
-            $convertedFile = Get-ChildItem -Path (Split-Path -Parent $filePath) -Filter "*$fileNameWithoutExt*converted*.zip" | Select-Object -First 1
+            Write-Host "ファイル名(拡張子なし): $fileNameWithoutExt"
             
-            # ファイルが見つからない場合は、より広い範囲で検索
-            if (-not $convertedFile) {
-                Write-Host "指定パスで変換ファイルが見つかりませんでした。ワークスペース全体を検索します..."
-                $convertedFile = Get-ChildItem -Path ${{ github.workspace }} -Recurse -Filter "*converted*.zip" | Select-Object -First 1
+            # 方法2: ワークスペース全体を検索
+            Write-Host "ワークスペース全体のZIPファイルを検索:"
+            $allZips = Get-ChildItem -Path ${{ github.workspace }} -Recurse -Filter "*.zip" | Where-Object { $_.FullName -ne $filePath }
+            
+            foreach ($zip in $allZips) {
+                Write-Host "ZIPファイル発見: $($zip.FullName) (最終更新: $($zip.LastWriteTime))"
             }
+            
+            # 最も新しいZIPファイルを選択
+            $convertedFile = $allZips | Sort-Object LastWriteTime -Descending | Select-Object -First 1
             
             if ($convertedFile) {
               Write-Host "変換されたファイルが見つかりました: $($convertedFile.FullName)"
