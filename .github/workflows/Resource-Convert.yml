@@ -1,0 +1,124 @@
+name: Resource Convert
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  convert:
+    if: contains(github.event.issue.title, '[Resource Pack]')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: 📄 Issueの内容を解析
+        id: parse
+        run: |
+          ISSUE_BODY="${{ github.event.issue.body }}"
+          DOWNLOAD_URL=$(echo "$ISSUE_BODY" | grep -o 'https\?://[^ ]*' | head -1)
+          
+          if [ -z "$DOWNLOAD_URL" ]; then
+            echo "::error::ダウンロードURLが見つかりません"
+            exit 1
+          fi
+          
+          echo "download_url=$DOWNLOAD_URL" >> $GITHUB_OUTPUT
+          echo "issue_number=${{ github.event.issue.number }}" >> $GITHUB_OUTPUT
+          
+          echo "Found URL: $DOWNLOAD_URL"
+
+      - name: 📦 リソースパックをダウンロード
+        run: |
+          wget -O resource-pack.zip "${{ steps.parse.outputs.download_url }}"
+          ls -la resource-pack.zip
+
+      - name: 📦 リソースパックを展開
+        run: |
+          echo "📦 リソースパックを展開中..."
+          unzip -q resource-pack.zip -d resource-pack/
+          ls -la resource-pack/
+
+      - name: 🔧 McEncryptorをセットアップ
+        run: |
+          echo "🔧 McEncryptorをセットアップ中..."
+          chmod +x MCEnc/McEncryptor.exe
+          ls -la MCEnc/
+
+      - name: ✨ リソースパックを変換
+        run: |
+          echo "✨ リソースパック変換を開始..."
+          cd resource-pack
+          find . -name "*.json" | head -5
+
+          # McEncryptorで変換実行
+          if [ -f "../MCEnc/McEncryptor.exe" ]; then
+            echo "McEncryptorで変換実行中..."
+            mono ../MCEnc/McEncryptor.exe
+          else
+            echo "❌ McEncryptor.exeが見つかりません"
+            exit 1
+          fi
+
+          echo "✅ 変換完了"
+
+      - name: 📦 変換済みファイルをアーカイブ
+        run: |
+          echo "📦 変換済みファイルをアーカイブ中..."
+          cd resource-pack
+          zip -r ../converted-resource-pack.zip .
+          cd ..
+          ls -la converted-resource-pack.zip
+
+      - name: 📤 変換済みファイルをアップロード
+        uses: actions/upload-artifact@v4
+        with:
+          name: converted-resource-pack
+          path: converted-resource-pack.zip
+
+      - name: 💬 Issueにコメントを投稿
+        uses: actions/github-script@v7
+        env:
+          ISSUE_NUMBER: ${{ steps.parse.outputs.issue_number }}
+        with:
+          script: |
+            const issueNumber = process.env.ISSUE_NUMBER;
+            const runId = process.env.GITHUB_RUN_ID;
+            const repoUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}`;
+
+            const comment = [
+              '✅ **リソースパック変換が完了しました！**',
+              '',
+              '📦 変換済みファイルのダウンロード',
+              `${repoUrl}/actions/runs/${runId}`,
+              '',
+              '🎉 変換処理が正常に完了しました。上記のリンクからArtifactsセクションで変換済みファイルをダウンロードできます。'
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: parseInt(issueNumber),
+              body: comment
+            });
+
+      - name: 🔒 Issueをクローズ
+        uses: actions/github-script@v7
+        env:
+          ISSUE_NUMBER: ${{ steps.parse.outputs.issue_number }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          script: |
+            const issueNumber = process.env.ISSUE_NUMBER;
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: parseInt(issueNumber),
+              state: 'closed'
+            });
+            console.log('✅ Issue #' + issueNumber + ' をクローズしました')
