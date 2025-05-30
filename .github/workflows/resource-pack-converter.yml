@@ -6,8 +6,8 @@ on:
 
 jobs:
   convert-resource-pack:
-    # Convertコマンドが入力された場合のみ実行
-    if: contains(github.event.comment.body, 'Convert')
+    # Issueのタイトルにbuildが含まれている場合のみ実行
+    if: contains(github.event.issue.title, 'build') || contains(github.event.issue.title, 'Build')
     runs-on: windows-latest
     name: Minecraft Resource Pack Converter
 
@@ -27,6 +27,8 @@ jobs:
               issue_number: issueNumber
             });
             
+            console.log('Issue title:', issue.data.title);
+            
             return {
               number: issueNumber,
               title: issue.data.title,
@@ -44,11 +46,43 @@ jobs:
             
             // Issueのコメントから添付ファイルのURLを抽出
             const comment = context.payload.comment;
-            // 両方のURLパターンに対応するための正規表現
-            const regex = /(https:\/\/github\.com\/.*\/files\/.*\.(zip|mcpack)|https:\/\/github\.com\/user-attachments\/files\/[0-9]+\/.*\.(zip|mcpack))/g;
+            
+            // デバッグ用にコメント内容をログに出力
+            console.log('Comment body:', comment.body);
+            
+            // より柔軟な正規表現パターン - GitHubの添付ファイルURLを幅広く検出
+            const regex = /https:\/\/github\.com\/[^\/\s]+\/(?:files|user-attachments\/files)\/[^\/\s]+\/[^\/\s]+\.(zip|mcpack)/gi;
             const matches = comment.body.match(regex);
             
+            console.log('Matches found:', matches);
+            
             if (!matches || matches.length === 0) {
+              // Markdownリンク形式も検出してみる
+              const mdLinkRegex = /\[.*?\]\((https:\/\/github\.com\/[^\/\s]+\/(?:files|user-attachments\/files)\/[^\/\s]+\/[^\/\s]+\.(zip|mcpack))\)/gi;
+              const mdMatches = [];
+              let mdMatch;
+              
+              while ((mdMatch = mdLinkRegex.exec(comment.body)) !== null) {
+                mdMatches.push(mdMatch[1]); // URLの部分だけを取得
+              }
+              
+              console.log('Markdown link matches found:', mdMatches);
+              
+              if (mdMatches.length > 0) {
+                // Markdownリンクからファイル名を取得
+                const attachmentUrl = mdMatches[0];
+                const fileName = path.basename(attachmentUrl);
+                const downloadPath = path.join(process.env.GITHUB_WORKSPACE, fileName);
+                
+                // ファイルをダウンロード
+                execSync(`curl -L "${attachmentUrl}" -o "${downloadPath}"`);
+                
+                console.log(`Downloaded file from markdown link to: ${downloadPath}`);
+                core.setOutput('file_path', downloadPath);
+                core.setOutput('file_name', fileName);
+                return { file_path: downloadPath, file_name: fileName };
+              }
+              
               core.setFailed('No resource pack file found in the comment');
               return;
             }
@@ -76,7 +110,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: issueNumber,
-              body: `🔍 リソースパックファイルを検出しました: **${fileName}**\n\n変換処理を開始します...お待ちください。`
+              body: `🔍 リソースパックファイル「**${fileName}**」を検出しました\n\n変換処理を開始します...お待ちください。`
             });
 
       - name: Convert resource pack
@@ -156,5 +190,5 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: issueNumber,
-              body: `✅ リソースパックの変換が完了しました！\n\n元のファイル: ${originalFileName}\n変換されたファイル: ${fileName}\n\n[ダウンロードリンク](${downloadUrl})\n\nこのファイルは7日間保存されます。`
+              body: `✅ リソースパックの変換が完了しました！\n\n元のファイル: **${originalFileName}**\n変換されたファイル: **${fileName}**\n\n[⬇️ ダウンロードリンク](${downloadUrl})\n\n*このファイルは7日間保存されます*`
             });
