@@ -4,9 +4,12 @@ on:
   issues:
     types: [labeled]
 
+permissions:
+  issues: write
+  contents: read
+
 jobs:
   convert-resource-pack:
-    # buildラベルが追加された場合のみ実行
     if: github.event.label.name == 'build'
     runs-on: windows-latest
 
@@ -14,144 +17,143 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Get issue info
-        id: issue
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const issueNumber = context.issue.number;
-            const issue = await github.rest.issues.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: issueNumber
-            });
-            
-            console.log('Issue title:', issue.data.title);
-            console.log('Issue body:', issue.data.body);
-            
-            return {
-              number: issueNumber,
-              title: issue.data.title,
-              body: issue.data.body
-            };
-
       - name: Download attachment
         id: download
         uses: actions/github-script@v7
         with:
           script: |
-            const fs = require('fs');
-            const path = require('path');
-            const { execSync } = require('child_process');
-            
-            // Issue本文からURLを抽出
-            const issueBody = context.payload.issue.body || '';
-            // コメントも確認するため、最新のコメントを取得
-            const comments = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number
-            });
-            
-            // Issue本文とすべてのコメントを検索対象にする
-            const textToSearch = [issueBody];
-            for (const comment of comments.data) {
-              textToSearch.push(comment.body);
-            }
-            
-            console.log('Searching in:', textToSearch);
-            
-            // URLを検索
-            let attachmentUrl = null;
-            let fileName = null;
-            
-            for (const text of textToSearch) {
-              // ZIP形式のみを検出するように正規表現を修正
-              const regex = /https:\/\/github\.com\/[^\/\s]+\/(?:files|user-attachments\/files)\/[^\/\s]+\/[^\/\s]+\.zip/gi;
-              const matches = text.match(regex);
+            try {
+              const fs = require('fs');
+              const path = require('path');
+              const { execSync } = require('child_process');
               
-              if (matches && matches.length > 0) {
-                attachmentUrl = matches[0];
-                fileName = path.basename(attachmentUrl);
-                break;
+              const issueBody = context.payload.issue.body || '';
+              const comments = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number
+              });
+              
+              const textToSearch = [issueBody];
+              for (const comment of comments.data) {
+                textToSearch.push(comment.body);
               }
               
-              // Markdownリンク形式も検出（ZIP形式のみ）
-              const mdLinkRegex = /\[.*?\]\((https:\/\/github\.com\/[^\/\s]+\/(?:files|user-attachments\/files)\/[^\/\s]+\/[^\/\s]+\.zip)\)/gi;
-              let mdMatch;
+              let attachmentUrl = null;
+              let fileName = null;
               
-              while ((mdMatch = mdLinkRegex.exec(text)) !== null) {
-                attachmentUrl = mdMatch[1];
-                fileName = path.basename(attachmentUrl);
-                break;
+              for (const text of textToSearch) {
+                const regex = /https:\/\/github\.com\/[^\/\s]+\/(?:files|user-attachments\/files)\/[^\/\s]+\/[^\/\s]+\.zip/gi;
+                const matches = text.match(regex);
+                
+                if (matches && matches.length > 0) {
+                  attachmentUrl = matches[0];
+                  fileName = path.basename(attachmentUrl);
+                  break;
+                }
+                
+                const mdLinkRegex = /\[.*?\]\((https:\/\/github\.com\/[^\/\s]+\/(?:files|user-attachments\/files)\/[^\/\s]+\/[^\/\s]+\.zip)\)/gi;
+                let mdMatch;
+                
+                while ((mdMatch = mdLinkRegex.exec(text)) !== null) {
+                  attachmentUrl = mdMatch[1];
+                  fileName = path.basename(attachmentUrl);
+                  break;
+                }
+                
+                if (attachmentUrl) break;
               }
               
-              if (attachmentUrl) break;
+              if (!attachmentUrl) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body: '❌ **エラー**: ZIPファイル形式のリソースパックが見つかりませんでした。\\n\\nIssue本文またはコメントにZIPファイルのURLを記載してください。'
+                });
+                core.setFailed('ZIPファイルが見つかりませんでした');
+                return;
+              }
+              
+              const downloadPath = path.join(process.env.GITHUB_WORKSPACE, fileName);
+              execSync(`curl -L "${attachmentUrl}" -o "${downloadPath}"`);
+              
+              core.setOutput('file_path', downloadPath);
+              core.setOutput('file_name', fileName);
+              core.setOutput('download_success', 'true');
+              return { file_path: downloadPath, file_name: fileName };
+            } catch (error) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: `❌ **ダウンロードエラー**: ${error.message}`
+              });
+              throw error;
             }
-            
-            if (!attachmentUrl) {
-              core.setFailed('ZIPファイル形式のリソースパックが見つかりませんでした。Issue本文またはコメントにZIPファイルのURLを記載してください。');
-              return;
-            }
-            
-            console.log('Found attachment URL:', attachmentUrl);
-            console.log('File name:', fileName);
-            
-            const downloadPath = path.join(process.env.GITHUB_WORKSPACE, fileName);
-            
-            // ファイルをダウンロード
-            execSync(`curl -L "${attachmentUrl}" -o "${downloadPath}"`);
-            
-            console.log(`Downloaded file to: ${downloadPath}`);
-            core.setOutput('file_path', downloadPath);
-            core.setOutput('file_name', fileName);
-            return { file_path: downloadPath, file_name: fileName };
 
       - name: Notify file detection
+        if: steps.download.outputs.download_success == 'true'
         uses: actions/github-script@v7
         with:
           script: |
-            const issueNumber = context.issue.number;
             const fileName = '${{ steps.download.outputs.file_name }}';
-            
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: issueNumber,
-              body: `🔍 ZIPリソースパックファイル「**${fileName}**」を検出しました\n\n変換処理を開始します...お待ちください。`
+              issue_number: context.issue.number,
+              body: `🔍 ZIPリソースパックファイル「**${fileName}**」を検出しました\\n\\n変換処理を開始します...お待ちください。`
             });
 
       - name: Convert resource pack
         id: convert
+        if: steps.download.outputs.download_success == 'true'
         shell: powershell
         run: |
-          $filePath = "${{ steps.download.outputs.file_path }}"
-          $outputPath = "${{ runner.temp }}/converted_${{ steps.download.outputs.file_name }}"
-          
-          # McEncryptor.exeの実行
-          cd ${{ github.workspace }}
-          $process = Start-Process -FilePath "MCEnc/McEncryptor.exe" -NoNewWindow -PassThru
-          Start-Sleep -Seconds 2
-          
-          # ファイルパスの入力
-          Add-Type -AssemblyName System.Windows.Forms
-          [System.Windows.Forms.SendKeys]::SendWait("$filePath{ENTER}")
-          
-          # プロセスが終了するまで待機
-          $process.WaitForExit()
-          
-          # 変換されたファイルを探して移動
-          $convertedFile = Get-ChildItem -Path (Split-Path -Parent $filePath) -Filter "*converted*" | Select-Object -First 1
-          if ($convertedFile) {
-            Move-Item -Path $convertedFile.FullName -Destination $outputPath
-            Write-Output "converted_file_path=$outputPath" >> $env:GITHUB_OUTPUT
-            Write-Output "converted_file_name=$($convertedFile.Name)" >> $env:GITHUB_OUTPUT
-          } else {
-            Write-Output "::error::Converted file not found"
+          try {
+            $filePath = "${{ steps.download.outputs.file_path }}"
+            $outputPath = "${{ runner.temp }}/converted_${{ steps.download.outputs.file_name }}"
+            
+            cd ${{ github.workspace }}
+            $process = Start-Process -FilePath "MCEnc/McEncryptor.exe" -NoNewWindow -PassThru
+            Start-Sleep -Seconds 2
+            
+            Add-Type -AssemblyName System.Windows.Forms
+            [System.Windows.Forms.SendKeys]::SendWait("$filePath{ENTER}")
+            
+            $process.WaitForExit()
+            
+            $convertedFile = Get-ChildItem -Path (Split-Path -Parent $filePath) -Filter "*converted*" | Select-Object -First 1
+            if ($convertedFile) {
+              Move-Item -Path $convertedFile.FullName -Destination $outputPath
+              Write-Output "converted_file_path=$outputPath" >> $env:GITHUB_OUTPUT
+              Write-Output "converted_file_name=$($convertedFile.Name)" >> $env:GITHUB_OUTPUT
+              Write-Output "conversion_success=true" >> $env:GITHUB_OUTPUT
+            } else {
+              Write-Output "conversion_success=false" >> $env:GITHUB_OUTPUT
+              Write-Output "::error::Converted file not found"
+              exit 1
+            }
+          } catch {
+            Write-Output "conversion_success=false" >> $env:GITHUB_OUTPUT
+            Write-Output "::error::Conversion failed: $($_.Exception.Message)"
             exit 1
           }
 
+      - name: Notify conversion error
+        if: failure() && steps.convert.conclusion == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `❌ **変換エラー**: リソースパックの変換に失敗しました。\\n\\nファイルが破損しているか、対応していない形式の可能性があります。`
+            });
+
       - name: Upload converted file
+        if: steps.convert.outputs.conversion_success == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: converted-resource-pack
@@ -160,46 +162,52 @@ jobs:
 
       - name: Create download link
         id: download_link
+        if: steps.convert.outputs.conversion_success == 'true'
         uses: actions/github-script@v7
         with:
           script: |
-            const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              run_id: context.runId
-            });
-            
-            const artifact = artifacts.data.artifacts.find(a => a.name === 'converted-resource-pack');
-            const downloadUrl = artifact ? artifact.archive_download_url : `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            
+            const downloadUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             core.setOutput('url', downloadUrl);
             return { url: downloadUrl };
 
-      - name: Add label to issue
+      - name: Complete and close issue
+        if: steps.convert.outputs.conversion_success == 'true'
         uses: actions/github-script@v7
         with:
           script: |
-            const issueNumber = context.issue.number;
-            
-            await github.rest.issues.addLabels({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: issueNumber,
-              labels: ['converted']
-            });
-
-      - name: Notify on issue
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const issueNumber = context.issue.number;
             const downloadUrl = '${{ steps.download_link.outputs.url }}';
             const fileName = '${{ steps.convert.outputs.converted_file_name }}';
             const originalFileName = '${{ steps.download.outputs.file_name }}';
             
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: ['converted']
+            });
+            
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: issueNumber,
-              body: `✅ リソースパックの変換が完了しました！\n\n元のファイル: **${originalFileName}**\n変換されたファイル: **${fileName}**\n\n[⬇️ ダウンロードリンク](${downloadUrl})\n\n*このファイルは7日間保存されます*`
+              issue_number: context.issue.number,
+              body: `✅ **リソースパックの変換が完了しました！**\\n\\n📁 元のファイル: **${originalFileName}**\\n📦 変換されたファイル: **${fileName}**\\n\\n[⬇️ ダウンロードリンク](${downloadUrl})\\n\\n*このファイルは7日間保存されます*\\n\\n🔒 このIssueを自動的にクローズします。`
+            });
+            
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'closed'
+            });
+
+      - name: Handle general failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `❌ **処理エラー**: 予期しないエラーが発生しました。\\n\\n詳細: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
             });
