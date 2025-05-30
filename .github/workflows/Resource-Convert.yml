@@ -123,61 +123,61 @@ jobs:
             # McEncryptorのパス
             $mcEncPath = Join-Path ${{ github.workspace }} "MCEnc\McEncryptor.exe"
             
-            Write-Host "MCEnc ディレクトリ内のファイル一覧:"
+            Write-Host "Files in MCEnc directory:"
             Get-ChildItem -Path "MCEnc" -Force | ForEach-Object { Write-Host $_.FullName }
             
             # 単純な方法でMcEncryptorを実行する
-            Write-Host "McEncryptorを実行します: $mcEncPath"
+            Write-Host "Executing McEncryptor: $mcEncPath"
             
             # 現在のディレクトリを確認
             $currentDir = Get-Location
-            Write-Host "現在の作業ディレクトリ: $currentDir"
+            Write-Host "Current working directory: $currentDir"
             
             # 単純なコマンドライン実行
-            Write-Host "シンプルなコマンド実行を試みます"
+            Write-Host "Attempting simple command execution"
             
             # 入力ファイルの存在を確認
             if (Test-Path $filePath) {
-                Write-Host "変換元ファイルが存在します: $filePath"
+                Write-Host "Input file exists: $filePath"
             } else {
-                Write-Host "エラー: 変換元ファイル $filePath が見つかりません"
+                Write-Host "Error: Input file $filePath not found"
             }
             
             # 直接エコーコマンドでパイプ
             cmd /c "echo $filePath | $mcEncPath"
             
-            Write-Host "McEncryptorの実行が完了しました。出力ファイルを検索します。"
+            Write-Host "McEncryptor execution completed. Searching for output files."
             
             # 変換完了まで少し長めに待機
-            Write-Host "変換処理の完了を待機中..."
+            Write-Host "Waiting for conversion process to complete..."
             Start-Sleep -Seconds 15
             
             # 変換されたファイルを複数の方法で探索
-            Write-Host "変換されたファイルを探索中..."
+            Write-Host "Searching for converted files..."
             
             # 方法1: 元ファイル名に基づく検索
             $fileNameWithoutExt = [System.IO.Path]::GetFileNameWithoutExtension($filePath)
-            Write-Host "ファイル名(拡張子なし): $fileNameWithoutExt"
+            Write-Host "Filename without extension: $fileNameWithoutExt"
             
             # 方法2: ワークスペース全体を検索
-            Write-Host "ワークスペース全体のZIPファイルを検索:"
+            Write-Host "Searching for ZIP files in the workspace:"
             $allZips = Get-ChildItem -Path ${{ github.workspace }} -Recurse -Filter "*.zip" | Where-Object { $_.FullName -ne $filePath }
             
             foreach ($zip in $allZips) {
-                Write-Host "ZIPファイル発見: $($zip.FullName) (最終更新: $($zip.LastWriteTime))"
+                Write-Host "ZIP file found: $($zip.FullName) (Last modified: $($zip.LastWriteTime))"
             }
             
             # 最も新しいZIPファイルを選択
             $convertedFile = $allZips | Sort-Object LastWriteTime -Descending | Select-Object -First 1
             
             if ($convertedFile) {
-              Write-Host "変換されたファイルが見つかりました: $($convertedFile.FullName)"
+              Write-Host "Converted file found: $($convertedFile.FullName)"
               Move-Item -Path $convertedFile.FullName -Destination $outputPath -Force
               "converted_file_path=$outputPath" >> $env:GITHUB_OUTPUT
               "converted_file_name=$($convertedFile.Name)" >> $env:GITHUB_OUTPUT
               "conversion_success=true" >> $env:GITHUB_OUTPUT
             } else {
-              Write-Host "変換ファイル検索結果:"
+              Write-Host "Converted file search results:"
               Get-ChildItem -Path ${{ github.workspace }} -Recurse -Filter "*.zip" | ForEach-Object { Write-Host $_.FullName }
               "conversion_success=false" >> $env:GITHUB_OUTPUT
               Write-Output "::error::Converted file not found"
@@ -185,7 +185,7 @@ jobs:
             }
           } 
           catch {
-            Write-Host "エラー詳細: $_"
+            Write-Host "Error details: $_"
             "conversion_success=false" >> $env:GITHUB_OUTPUT
             Write-Output "::error::Conversion failed: $($_.Exception.Message)"
             exit 1
