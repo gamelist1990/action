@@ -110,11 +110,11 @@ jobs:
         if: steps.download.outputs.download_success == 'true'
         shell: powershell
         run: |
+          # UTF-8エンコーディングを強制
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          
           try {
-            # UTF-8エンコーディングを強制
-            [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-            $OutputEncoding = [System.Text.Encoding]::UTF8
-            
             $filePath = "${{ steps.download.outputs.file_path }}"
             $outputPath = "${{ runner.temp }}/converted_${{ steps.download.outputs.file_name }}"
             
@@ -129,15 +129,10 @@ jobs:
             # コンソールアプリケーションを実行する方法を修正
             Write-Host "McEncryptorを実行します: $mcEncPath"
             
-            try {
-                # echoコマンドを使ってパスを渡す
-                $command = "echo `"$filePath`" | & `"$mcEncPath`""
-                Write-Host "実行コマンド: $command"
-                Invoke-Expression $command
-            }
-            catch {
-                Write-Host "コマンド実行中にエラーが発生しました: $_"
-            }
+            # echoコマンドを使ってパスを渡す
+            $command = "echo `"$filePath`" | & `"$mcEncPath`""
+            Write-Host "実行コマンド: $command"
+            Invoke-Expression $command
             
             Write-Host "McEncryptorの実行が完了しました。出力ファイルを検索します。"
             
@@ -168,7 +163,8 @@ jobs:
               Write-Output "::error::Converted file not found"
               exit 1
             }
-          } catch {
+          } 
+          catch {
             Write-Host "エラー詳細: $_"
             "conversion_success=false" >> $env:GITHUB_OUTPUT
             Write-Output "::error::Conversion failed: $($_.Exception.Message)"
