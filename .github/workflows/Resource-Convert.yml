@@ -1,4 +1,4 @@
-name: Resource Pack Converter
+name: Resource Convert
 
 on:
   issues:
@@ -69,7 +69,7 @@ jobs:
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   issue_number: context.issue.number,
-                  body: '❌ **エラー**: ZIPファイル形式のリソースパックが見つかりませんでした。\\n\\nIssue本文またはコメントにZIPファイルのURLを記載してください。'
+                  body: '🚫 **エラー**: ZIP ファイル形式のリソースパックが見つかりませんでした。\n\nIssue本文またはコメントにZIPファイルのURLを記載してください。'
                 });
                 core.setFailed('ZIPファイルが見つかりませんでした');
                 return;
@@ -87,7 +87,7 @@ jobs:
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: context.issue.number,
-                body: `❌ **ダウンロードエラー**: ${error.message}`
+                body: `🚫 **ダウンロードエラー**: ${error.message}`
               });
               throw error;
             }
@@ -102,8 +102,21 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `🔍 ZIPリソースパックファイル「**${fileName}**」を検出しました\\n\\n変換処理を開始します...お待ちください。`
+              body: `📦 ZIP リソースパックファイル「**${fileName}**」が検出されました。\n\n変換処理を開始します...お待ちください。`
             });
+
+      - name: Setup manifest for McEncryptor
+        if: steps.download.outputs.download_success == 'true'
+        shell: powershell
+        run: |
+          $manifestContent = @'
+          {
+            "uuid": "00000000-0000-0000-0000-000000000000"
+          }
+          '@
+          
+          New-Item -Path "MCEnc\manifest.json" -Force -ItemType File -Value $manifestContent
+          Write-Host "マニフェストファイルが作成されました"
 
       - name: Convert resource pack
         id: convert
@@ -115,17 +128,36 @@ jobs:
             $outputPath = "${{ runner.temp }}/converted_${{ steps.download.outputs.file_name }}"
             
             cd ${{ github.workspace }}
-            $process = Start-Process -FilePath "MCEnc/McEncryptor.exe" -NoNewWindow -PassThru
-            Start-Sleep -Seconds 2
             
-            Add-Type -AssemblyName System.Windows.Forms
-            [System.Windows.Forms.SendKeys]::SendWait("$filePath{ENTER}")
+            # 変換前にマニフェストファイルが存在することを確認
+            if (-not (Test-Path "MCEnc\manifest.json")) {
+              $manifestContent = @'
+              {
+                "uuid": "00000000-0000-0000-0000-000000000000"
+              }
+              '@
+              New-Item -Path "MCEnc\manifest.json" -Force -ItemType File -Value $manifestContent
+              Write-Host "マニフェストファイルが作成されました"
+            }
             
-            $process.WaitForExit()
+            # McEncryptorのパスとファイルパスを両方とも絶対パスで指定
+            $mcEncPath = Join-Path ${{ github.workspace }} "MCEnc\McEncryptor.exe"
             
-            $convertedFile = Get-ChildItem -Path (Split-Path -Parent $filePath) -Filter "*converted*" | Select-Object -First 1
+            # コマンドライン実行時にファイルパスを渡す
+            Start-Process -FilePath $mcEncPath -ArgumentList "`"$filePath`"" -NoNewWindow -Wait
+            
+            # 変換されたファイルを探索
+            $fileNameWithoutExt = [System.IO.Path]::GetFileNameWithoutExtension($filePath)
+            $convertedFile = Get-ChildItem -Path (Split-Path -Parent $filePath) -Filter "*$fileNameWithoutExt*converted*.zip" | Select-Object -First 1
+            
+            # ファイルが見つからない場合は、より広い範囲で検索
+            if (-not $convertedFile) {
+                $convertedFile = Get-ChildItem -Path ${{ github.workspace }} -Recurse -Filter "*converted*.zip" | Select-Object -First 1
+            }
+            
             if ($convertedFile) {
-              Move-Item -Path $convertedFile.FullName -Destination $outputPath
+              Write-Host "変換されたファイルが見つかりました: $($convertedFile.FullName)"
+              Move-Item -Path $convertedFile.FullName -Destination $outputPath -Force
               Write-Output "converted_file_path=$outputPath" >> $env:GITHUB_OUTPUT
               Write-Output "converted_file_name=$($convertedFile.Name)" >> $env:GITHUB_OUTPUT
               Write-Output "conversion_success=true" >> $env:GITHUB_OUTPUT
@@ -149,7 +181,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `❌ **変換エラー**: リソースパックの変換に失敗しました。\\n\\nファイルが破損しているか、対応していない形式の可能性があります。`
+              body: `❌ **変換エラー**: リソースパックの変換に失敗しました。\n\nファイルが破損しているか、対応していない形式の可能性があります。`
             });
 
       - name: Upload converted file
@@ -190,7 +222,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `✅ **リソースパックの変換が完了しました！**\\n\\n📁 元のファイル: **${originalFileName}**\\n📦 変換されたファイル: **${fileName}**\\n\\n[⬇️ ダウンロードリンク](${downloadUrl})\\n\\n*このファイルは7日間保存されます*\\n\\n🔒 このIssueを自動的にクローズします。`
+              body: `✅ **リソースパックの変換が完了しました！**\n\n📄 元のファイル: **${originalFileName}**\n📦 変換されたファイル: **${fileName}**\n\n[📥 ダウンロードリンク](${downloadUrl})\n\n*このファイルは7日間保存されます*\n\n✨ このIssueを自動的にクローズします。`
             });
             
             await github.rest.issues.update({
@@ -209,5 +241,5 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `❌ **処理エラー**: 予期しないエラーが発生しました。\\n\\n詳細: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+              body: `🚫 **一般エラー**: 予期しないエラーが発生しました。\n\n詳細: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
             });
