@@ -9,6 +9,7 @@ jobs:
     # Convertコマンドが入力された場合のみ実行
     if: contains(github.event.comment.body, 'Convert')
     runs-on: windows-latest
+    name: Minecraft Resource Pack Converter
 
     steps:
       - name: Checkout repository
@@ -43,7 +44,8 @@ jobs:
             
             // Issueのコメントから添付ファイルのURLを抽出
             const comment = context.payload.comment;
-            const regex = /https:\/\/github\.com\/.*\/files\/.*\.(zip|mcpack)/g;
+            // 両方のURLパターンに対応するための正規表現
+            const regex = /(https:\/\/github\.com\/.*\/files\/.*\.(zip|mcpack)|https:\/\/github\.com\/user-attachments\/files\/[0-9]+\/.*\.(zip|mcpack))/g;
             const matches = comment.body.match(regex);
             
             if (!matches || matches.length === 0) {
@@ -114,6 +116,19 @@ jobs:
             core.setOutput('url', downloadUrl);
             return { url: downloadUrl };
 
+      - name: Add label to issue
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const issueNumber = context.issue.number;
+            
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              labels: ['converted']
+            });
+
       - name: Notify on issue
         uses: actions/github-script@v6
         with:
@@ -121,10 +136,11 @@ jobs:
             const issueNumber = context.issue.number;
             const downloadUrl = '${{ steps.download_link.outputs.url }}';
             const fileName = '${{ steps.convert.outputs.converted_file_name }}';
+            const originalFileName = '${{ steps.download.outputs.file_name }}';
             
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: issueNumber,
-              body: `✅ リソースパックの変換が完了しました！\n\n変換されたファイル: ${fileName}\n\n[ダウンロードリンク](${downloadUrl})\n\nこのファイルは7日間保存されます。`
+              body: `✅ リソースパックの変換が完了しました！\n\n元のファイル: ${originalFileName}\n変換されたファイル: ${fileName}\n\n[ダウンロードリンク](${downloadUrl})\n\nこのファイルは7日間保存されます。`
             });
